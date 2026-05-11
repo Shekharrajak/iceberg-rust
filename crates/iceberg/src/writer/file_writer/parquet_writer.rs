@@ -274,6 +274,11 @@ impl MinMaxColAggregator {
             // Ignore the field if it is not in schema.
             return Ok(());
         };
+        // Variant bytes are not order-preserving; skip min/max collection.
+        if matches!(ty, Type::Variant(_)) {
+            return Ok(());
+        }
+
         let Type::Primitive(ty) = ty.clone() else {
             return Err(Error::new(
                 ErrorKind::Unexpected,
