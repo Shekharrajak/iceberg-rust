@@ -26,6 +26,7 @@ use arrow_array::{
     FixedSizeBinaryArray, Float32Array, Float64Array, Int32Array, Int64Array, Scalar, StringArray,
     TimestampMicrosecondArray, TimestampNanosecondArray,
 };
+use arrow_schema::extension::EXTENSION_TYPE_NAME_KEY;
 use arrow_schema::{DataType, Field, Fields, Schema as ArrowSchema, TimeUnit};
 use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use parquet::file::statistics::Statistics;
@@ -242,7 +243,19 @@ pub fn arrow_type_to_type(ty: &DataType) -> Result<Type> {
     visit_type(ty, &mut visitor)
 }
 
+/// Convert an Arrow [`Field`] to an Iceberg [`Type`].
+///
+/// Detects extension types on the field metadata (currently the Variant extension type)
+/// before falling back to [`arrow_type_to_type`] for the underlying data type.
+pub fn arrow_field_to_type(field: &Field) -> Result<Type> {
+    if field.extension_type_name() == Some(VARIANT_EXTENSION_NAME) {
+        return Ok(Type::Variant(crate::spec::VariantType));
+    }
+    arrow_type_to_type(field.data_type())
+}
+
 const ARROW_FIELD_DOC_KEY: &str = "doc";
+const VARIANT_EXTENSION_NAME: &str = "arrow.parquet.variant";
 
 pub(super) fn get_field_id_from_metadata(field: &Field) -> Result<i32> {
     if let Some(value) = field.metadata().get(PARQUET_FIELD_ID_META_KEY) {
@@ -520,11 +533,7 @@ impl SchemaVisitor for ToArrowSchemaConverter {
         field: &crate::spec::NestedFieldRef,
         value: ArrowSchemaOrFieldOrType,
     ) -> crate::Result<ArrowSchemaOrFieldOrType> {
-        let ty = match value {
-            ArrowSchemaOrFieldOrType::Type(ty) => ty,
-            _ => unreachable!(),
-        };
-        let metadata = if let Some(doc) = &field.doc {
+        let mut metadata = if let Some(doc) = &field.doc {
             HashMap::from([
                 (PARQUET_FIELD_ID_META_KEY.to_string(), field.id.to_string()),
                 (ARROW_FIELD_DOC_KEY.to_string(), doc.clone()),
@@ -532,9 +541,25 @@ impl SchemaVisitor for ToArrowSchemaConverter {
         } else {
             HashMap::from([(PARQUET_FIELD_ID_META_KEY.to_string(), field.id.to_string())])
         };
-        Ok(ArrowSchemaOrFieldOrType::Field(
-            Field::new(field.name.clone(), ty, !field.required).with_metadata(metadata),
-        ))
+        let arrow_field = match value {
+            ArrowSchemaOrFieldOrType::Type(ty) => {
+                Field::new(field.name.clone(), ty, !field.required).with_metadata(metadata)
+            }
+            // Variant primitive returns a pre-built Field with extension metadata.
+            ArrowSchemaOrFieldOrType::Field(inner) => {
+                for (k, v) in inner.metadata() {
+                    metadata.insert(k.clone(), v.clone());
+                }
+                Field::new(
+                    field.name.clone(),
+                    inner.data_type().clone(),
+                    !field.required,
+                )
+                .with_metadata(metadata)
+            }
+            _ => unreachable!(),
+        };
+        Ok(ArrowSchemaOrFieldOrType::Field(arrow_field))
     }
 
     fn r#struct(
@@ -697,10 +722,15 @@ impl SchemaVisitor for ToArrowSchemaConverter {
         &mut self,
         _v: &crate::spec::VariantType,
     ) -> crate::Result<ArrowSchemaOrFieldOrType> {
-        Err(crate::Error::new(
-            crate::ErrorKind::FeatureUnsupported,
-            "Arrow schema conversion for Variant is not yet implemented",
-        ))
+        let metadata_field = Field::new("metadata", DataType::Binary, false);
+        let value_field = Field::new("value", DataType::Binary, true);
+        let struct_dt = DataType::Struct(Fields::from(vec![metadata_field, value_field]));
+        let extension_metadata = HashMap::from([(
+            EXTENSION_TYPE_NAME_KEY.to_string(),
+            VARIANT_EXTENSION_NAME.to_string(),
+        )]);
+        let field = Field::new("", struct_dt, true).with_metadata(extension_metadata);
+        Ok(ArrowSchemaOrFieldOrType::Field(field))
     }
 }
 
@@ -2336,5 +2366,57 @@ mod tests {
 
         pretty_assertions::assert_eq!(schema, expected);
         assert_eq!(schema.highest_field_id(), 17);
+    }
+
+    #[test]
+    fn variant_iceberg_to_arrow_field() {
+        let iceberg_schema = crate::spec::Schema::builder()
+            .with_fields(vec![
+                NestedField::optional(1, "attrs", Type::Variant(crate::spec::VariantType)).into(),
+            ])
+            .build()
+            .unwrap();
+        let arrow_schema = schema_to_arrow_schema(&iceberg_schema).unwrap();
+        let attrs = arrow_schema.field(0);
+        assert_eq!(attrs.name(), "attrs");
+        assert_eq!(attrs.extension_type_name(), Some(VARIANT_EXTENSION_NAME));
+        match attrs.data_type() {
+            DataType::Struct(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name(), "metadata");
+                assert!(!fields[0].is_nullable());
+                assert_eq!(fields[1].name(), "value");
+                assert!(fields[1].is_nullable());
+            }
+            other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn variant_arrow_field_to_iceberg() {
+        let metadata = HashMap::from([(
+            EXTENSION_TYPE_NAME_KEY.to_string(),
+            VARIANT_EXTENSION_NAME.to_string(),
+        )]);
+        let inner = DataType::Struct(Fields::from(vec![
+            Field::new("metadata", DataType::Binary, false),
+            Field::new("value", DataType::Binary, true),
+        ]));
+        let field = Field::new("attrs", inner, true).with_metadata(metadata);
+        let ty = arrow_field_to_type(&field).unwrap();
+        assert_eq!(ty, Type::Variant(crate::spec::VariantType));
+    }
+
+    #[test]
+    fn variant_arrow_field_to_iceberg_falls_through_without_extension() {
+        let id_meta =
+            |id: i32| HashMap::from([(PARQUET_FIELD_ID_META_KEY.to_string(), id.to_string())]);
+        let inner = DataType::Struct(Fields::from(vec![
+            Field::new("metadata", DataType::Binary, false).with_metadata(id_meta(2)),
+            Field::new("value", DataType::Binary, true).with_metadata(id_meta(3)),
+        ]));
+        let field = Field::new("attrs", inner, true).with_metadata(id_meta(1));
+        let ty = arrow_field_to_type(&field).unwrap();
+        assert!(matches!(ty, Type::Struct(_)));
     }
 }
