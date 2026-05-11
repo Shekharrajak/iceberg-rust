@@ -109,6 +109,17 @@ pub trait ArrowSchemaVisitor {
 
     /// Called when see a primitive type.
     fn primitive(&mut self, p: &DataType) -> Result<Self::T>;
+
+    /// Hook for visitors that want to handle Arrow extension types as opaque
+    /// leaves rather than recursing into the underlying storage layout.
+    /// Return `Ok(Some(t))` to short-circuit; the default returns `Ok(None)`.
+    fn visit_extension_field(
+        &mut self,
+        _field: &Field,
+        _extension_name: &str,
+    ) -> Result<Option<Self::T>> {
+        Ok(None)
+    }
 }
 
 /// Visiting a type in post order.
@@ -186,12 +197,24 @@ fn visit_list<V: ArrowSchemaVisitor>(
     visitor.list(data_type, value)
 }
 
+/// Visit a single field, short-circuiting to `visit_extension_field` when the
+/// field carries an Arrow extension that the visitor wants to handle as a leaf
+/// (e.g. the Variant extension on a struct).
+fn visit_field_dispatch<V: ArrowSchemaVisitor>(field: &Field, visitor: &mut V) -> Result<V::T> {
+    if let Some(ext) = field.metadata().get(EXTENSION_TYPE_NAME_KEY)
+        && let Some(result) = visitor.visit_extension_field(field, ext)?
+    {
+        return Ok(result);
+    }
+    visit_type(field.data_type(), visitor)
+}
+
 /// Visit struct type in post order.
 fn visit_struct<V: ArrowSchemaVisitor>(fields: &Fields, visitor: &mut V) -> Result<V::T> {
     let mut results = Vec::with_capacity(fields.len());
     for field in fields {
         visitor.before_field(field)?;
-        let result = visit_type(field.data_type(), visitor)?;
+        let result = visit_field_dispatch(field, visitor)?;
         visitor.after_field(field)?;
         results.push(result);
     }
@@ -207,7 +230,7 @@ pub(crate) fn visit_schema<V: ArrowSchemaVisitor>(
     let mut results = Vec::with_capacity(schema.fields().len());
     for field in schema.fields() {
         visitor.before_field(field)?;
-        let result = visit_type(field.data_type(), visitor)?;
+        let result = visit_field_dispatch(field, visitor)?;
         visitor.after_field(field)?;
         results.push(result);
     }
@@ -437,6 +460,17 @@ impl ArrowSchemaVisitor for ArrowSchemaConverter {
                 "Map type must have map data type",
             )),
         }
+    }
+
+    fn visit_extension_field(
+        &mut self,
+        _field: &Field,
+        extension_name: &str,
+    ) -> Result<Option<Self::T>> {
+        if extension_name == VARIANT_EXTENSION_NAME {
+            return Ok(Some(Type::Variant(crate::spec::VariantType)));
+        }
+        Ok(None)
     }
 
     fn primitive(&mut self, p: &DataType) -> Result<Self::T> {
@@ -2418,5 +2452,22 @@ mod tests {
         let field = Field::new("attrs", inner, true).with_metadata(id_meta(1));
         let ty = arrow_field_to_type(&field).unwrap();
         assert!(matches!(ty, Type::Struct(_)));
+    }
+
+    #[test]
+    fn variant_full_schema_round_trip_through_visitor() {
+        let original = crate::spec::Schema::builder()
+            .with_fields(vec![
+                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long)).into(),
+                NestedField::optional(2, "attrs", Type::Variant(crate::spec::VariantType)).into(),
+            ])
+            .build()
+            .unwrap();
+        let arrow_schema = schema_to_arrow_schema(&original).unwrap();
+        let recovered = arrow_schema_to_schema(&arrow_schema).unwrap();
+        assert_eq!(
+            recovered.field_by_id(2).unwrap().field_type.as_ref(),
+            &Type::Variant(crate::spec::VariantType)
+        );
     }
 }
