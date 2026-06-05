@@ -963,6 +963,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         // Load the deletes - should handle both types without error

@@ -110,6 +110,11 @@ pub struct FileScanTask {
 
     /// Whether this scan task should treat column names as case-sensitive when binding predicates.
     pub case_sensitive: bool,
+
+    /// v3 row-lineage seed from the manifest entry's `DataFile.first_row_id`.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_row_id: Option<i64>,
 }
 
 impl FileScanTask {
@@ -136,6 +141,11 @@ impl FileScanTask {
     /// Returns the schema of this file scan task as a SchemaRef
     pub fn schema_ref(&self) -> SchemaRef {
         self.schema.clone()
+    }
+
+    /// Returns the v3 row-lineage `first_row_id` from the underlying `DataFile`.
+    pub fn first_row_id(&self) -> Option<i64> {
+        self.first_row_id
     }
 }
 

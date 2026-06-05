@@ -456,6 +456,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         let tasks = Box::pin(futures::stream::iter(vec![Ok(task)])) as FileScanTaskStream;
@@ -677,6 +678,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         let tasks = Box::pin(futures::stream::iter(vec![Ok(task)])) as FileScanTaskStream;
@@ -892,6 +894,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         let tasks = Box::pin(futures::stream::iter(vec![Ok(task)])) as FileScanTaskStream;

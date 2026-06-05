@@ -595,6 +595,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -698,6 +699,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -800,6 +802,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -891,6 +894,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -996,6 +1000,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -1130,6 +1135,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -1231,6 +1237,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -1345,6 +1352,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -1489,6 +1497,7 @@ message schema {
                 partition_spec: Some(partition_spec),
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -1701,6 +1710,7 @@ message schema {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;

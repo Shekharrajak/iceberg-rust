@@ -235,6 +235,7 @@ mod tests {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             })]
             .into_iter(),
         )) as FileScanTaskStream;
@@ -532,6 +533,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         // Task 2: read the second and third row groups
@@ -550,6 +552,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         let tasks1 = Box::pin(futures::stream::iter(vec![Ok(task1)])) as FileScanTaskStream;
