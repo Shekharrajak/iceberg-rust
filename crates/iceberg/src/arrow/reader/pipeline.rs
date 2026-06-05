@@ -37,7 +37,9 @@ use crate::arrow::record_batch_transformer::RecordBatchTransformerBuilder;
 use crate::arrow::scan_metrics::{CountingFileRead, ScanMetrics, ScanResult};
 use crate::error::Result;
 use crate::io::{FileIO, FileMetadata, FileRead};
-use crate::metadata_columns::{RESERVED_FIELD_ID_FILE, is_metadata_field};
+use crate::metadata_columns::{
+    RESERVED_FIELD_ID_FILE, RESERVED_FIELD_ID_ROW_ID, is_metadata_field,
+};
 use crate::scan::{ArrowRecordBatchStream, FileScanTask, FileScanTaskStream};
 use crate::spec::Datum;
 use crate::{Error, ErrorKind};
@@ -239,6 +241,12 @@ impl FileScanTaskReader {
             let file_datum = Datum::string(task.data_file_path.clone());
             record_batch_transformer_builder =
                 record_batch_transformer_builder.with_constant(RESERVED_FIELD_ID_FILE, file_datum);
+        }
+
+        // v3 row-lineage stub: emit sentinel -1 per row (full materialisation = Phase 2a.1).
+        if task.project_field_ids().contains(&RESERVED_FIELD_ID_ROW_ID) {
+            record_batch_transformer_builder = record_batch_transformer_builder
+                .with_constant(RESERVED_FIELD_ID_ROW_ID, Datum::long(-1));
         }
 
         if let (Some(partition_spec), Some(partition_data)) =
@@ -506,6 +514,7 @@ mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
 
         let tasks = Box::pin(futures::stream::iter(vec![Ok(task)])) as FileScanTaskStream;
@@ -722,6 +731,7 @@ mod tests {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             }),
             Ok(FileScanTask {
                 file_size_in_bytes: std::fs::metadata(format!("{table_location}/file_1.parquet"))
@@ -740,6 +750,7 @@ mod tests {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             }),
             Ok(FileScanTask {
                 file_size_in_bytes: std::fs::metadata(format!("{table_location}/file_2.parquet"))
@@ -758,6 +769,7 @@ mod tests {
                 partition_spec: None,
                 name_mapping: None,
                 case_sensitive: false,
+                first_row_id: None,
             }),
         ];
 
