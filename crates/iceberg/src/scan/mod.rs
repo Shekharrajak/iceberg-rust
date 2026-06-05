@@ -622,7 +622,7 @@ pub mod tests {
     use crate::arrow::ArrowReaderBuilder;
     use crate::expr::{BoundPredicate, Reference};
     use crate::io::{FileIO, OutputFile};
-    use crate::metadata_columns::RESERVED_COL_NAME_FILE;
+    use crate::metadata_columns::{RESERVED_COL_NAME_FILE, RESERVED_COL_NAME_ROW_ID};
     use crate::scan::FileScanTask;
     use crate::spec::{
         DataContentType, DataFileBuilder, DataFileFormat, Datum, Literal, ManifestEntry,
@@ -1869,6 +1869,7 @@ pub mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
         test_fn(task);
 
@@ -1888,6 +1889,7 @@ pub mod tests {
             partition_spec: None,
             name_mapping: None,
             case_sensitive: false,
+            first_row_id: None,
         };
         test_fn(task);
     }
@@ -2237,5 +2239,67 @@ pub mod tests {
 
         // Assert it finished (didn't timeout)
         assert!(result.is_ok(), "Scan timed out - deadlock detected");
+    }
+
+    #[tokio::test]
+    async fn test_select_with_row_id_column() {
+        use arrow_array::cast::AsArray;
+
+        let mut fixture = TableTestFixture::new();
+        fixture.setup_manifest_files().await;
+
+        let table_scan = fixture
+            .table
+            .scan()
+            .select(["x", RESERVED_COL_NAME_ROW_ID])
+            .build()
+            .unwrap();
+
+        let batches: Vec<_> = table_scan
+            .to_arrow()
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(batches[0].num_columns(), 2);
+        let row_id_col = batches[0]
+            .column_by_name(RESERVED_COL_NAME_ROW_ID)
+            .expect("_row_id column must be present");
+        // Stub: column materialises but values are sentinel -1 (Phase 2a.1 lands real values).
+        let run_array = row_id_col
+            .as_any()
+            .downcast_ref::<arrow_array::RunArray<arrow_array::types::Int32Type>>()
+            .expect("_row_id column should be a RunArray");
+        let values = run_array
+            .values()
+            .as_primitive::<arrow_array::types::Int64Type>();
+        assert_eq!(values.len(), 1, "stub emits a single run value");
+        assert_eq!(values.value(0), -1);
+    }
+
+    #[tokio::test]
+    async fn test_first_row_id_plumbed_into_file_scan_task() {
+        let mut fixture = TableTestFixture::new();
+        fixture.setup_manifest_files().await;
+
+        let scan = fixture.table.scan().build().unwrap();
+        let tasks: Vec<FileScanTask> = scan
+            .plan_files()
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert!(!tasks.is_empty(), "test fixture must yield scan tasks");
+        for task in tasks {
+            assert_eq!(
+                task.first_row_id(),
+                task.first_row_id,
+                "getter matches field",
+            );
+        }
     }
 }
